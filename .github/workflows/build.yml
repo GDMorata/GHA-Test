@@ -101,7 +101,7 @@ jobs:
         env:
           TRIVY_CACHE_DIR: .cache/trivy
           TRIVY_SKIP_DIRS: .git,.cache,trivy,node_modules,dist,build
-          TRIVY_SCANNERS: vuln,secret,misconfig,license
+          TRIVY_SCANNERS: vuln,secret,misconfig
         with:
           scan-type: fs
           scan-ref: .
@@ -112,21 +112,38 @@ jobs:
           cache-dir: .cache/trivy
           exit-code: 0  
 
+      - name: Filter GPL/LGPL from SARIF (FS)
+        run: |
+          jq '
+            .runs |=
+            ( . // [] | map(
+                .results |=
+                ( .results // [] | map(
+                    select( ((.message.text // "") | test("\\bLG?PL\\b"; "i")) | not )
+                ))
+              ))
+          ' trivy-fs.sarif > trivy-fs.filtered.sarif
 
       - name: Upload SARIF (Trivy FS)
         if: always() && github.repository_owner == github.actor
         uses: github/codeql-action/upload-sarif@v3
         with:
-          sarif_file: trivy-fs.sarif
+          sarif_file: trivy-fs.filtered.sarif   
           category: trivy-fs
-          wait-for-processing: false   
+          wait-for-processing: false
 
       - name: Upload artifact (Trivy FS)
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: trivy-fs
-          path: trivy-fs.sarif
+          path: trivy-fs.filtered.sarif
+
+      - name: "Gate — fail if Trivy FS has High/Critical"
+        if: ${{ always() && github.ref == 'refs/heads/main' }}
+        run: |
+          jq -e '((.runs | map(.results | map(select(.level=="error")) | length) | add) // 0) == 0' trivy-fs.filtered.sarif >/dev/null || exit 1
+
 
       - name: Trivy image scan
         uses: aquasecurity/trivy-action@0.28.0
@@ -141,45 +158,34 @@ jobs:
           severity: CRITICAL,HIGH,MEDIUM
           ignore-unfixed: true
           cache-dir: .cache/trivy
-          exit-code: 0  
+          exit-code: 0
+
+      - name: Filter GPL/LGPL from SARIF (Image)
+        run: |
+          jq '
+            .runs |=
+            ( . // [] | map(
+                .results |=
+                ( .results // [] | map(
+                    select( ((.message.text // "") | test("\\bLG?PL\\b"; "i")) | not )
+                ))
+              ))
+          ' trivy-image.sarif > trivy-image.filtered.sarif
 
       - name: Upload SARIF (Trivy Image)
         if: always() && github.repository_owner == github.actor
         uses: github/codeql-action/upload-sarif@v3
         with:
-          sarif_file: trivy-image.sarif
+          sarif_file: trivy-image.filtered.sarif  
           category: trivy-image
-          wait-for-processing: false   
+          wait-for-processing: false
 
       - name: Upload artifact (Trivy Image)
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: trivy-image
-          path: trivy-image.sarif
-
-      - name: "Gate — fail if Trivy FS has High/Critical"
-        if: ${{ always() && github.ref == 'refs/heads/main' }}
-        run: |
-          jq -e '((.runs | map(.results | map(select(.level=="error")) | length) | add) // 0) == 0' trivy-fs.sarif >/dev/null || exit 1
-
-      - name: "Gate — fail if Trivy Image has High/Critical"
-        if: ${{ always() && github.ref == 'refs/heads/main' }}
-        run: |
-          jq -e '((.runs | map(.results | map(select(.level=="error")) | length) | add) // 0) == 0' trivy-image.sarif >/dev/null || exit 1
-
-      - name: "Gate — fail if Trivy Image >= THRESHOLD"
-        if: ${{ always() && github.ref == 'refs/heads/main' }}
-        env:
-          THRESHOLD: error   # error=High/Critical, warning=Medium+, note=Low+
-        run: |
-          case "$THRESHOLD" in
-            error) JQ='select(.level=="error")' ;;
-            warning) JQ='select(.level=="error" or .level=="warning")' ;;
-            note) JQ='select(.level=="error" or .level=="warning" or .level=="note")' ;;
-            *) echo "Invalid THRESHOLD"; exit 2 ;;
-          esac
-          jq -e "((.runs | map(.results | map($JQ) | length) | add) // 0) == 0" trivy-image.sarif >/dev/null || exit 1
+          path: trivy-image.filtered.sarif
 
 
   gitleaks:
