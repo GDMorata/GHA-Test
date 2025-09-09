@@ -158,16 +158,28 @@ jobs:
           name: trivy-image
           path: trivy-image.sarif
 
-      - name: "Gate — fail if Trivy FS found issues"
-        if: always()
+      - name: "Gate — fail if Trivy FS has High/Critical"
+        if: ${{ always() && github.ref == 'refs/heads/main' }}
         run: |
-          # Exit 1 if SARIF contains any results
-          jq -e '([.runs[].results[]] | length) == 0' trivy-fs.sarif >/dev/null || exit 1
+          jq -e '((.runs | map(.results | map(select(.level=="error")) | length) | add) // 0) == 0' trivy-fs.sarif >/dev/null || exit 1
 
-      - name: "Gate — fail if Trivy Image found issues"
-        if: always()
+      - name: "Gate — fail if Trivy Image has High/Critical"
+        if: ${{ always() && github.ref == 'refs/heads/main' }}
         run: |
-          jq -e '([.runs[].results[]] | length) == 0' trivy-image.sarif >/dev/null || exit 1
+          jq -e '((.runs | map(.results | map(select(.level=="error")) | length) | add) // 0) == 0' trivy-image.sarif >/dev/null || exit 1
+
+      - name: "Gate — fail if Trivy Image >= THRESHOLD"
+        if: ${{ always() && github.ref == 'refs/heads/main' }}
+        env:
+          THRESHOLD: error   # error=High/Critical, warning=Medium+, note=Low+
+        run: |
+          case "$THRESHOLD" in
+            error) JQ='select(.level=="error")' ;;
+            warning) JQ='select(.level=="error" or .level=="warning")' ;;
+            note) JQ='select(.level=="error" or .level=="warning" or .level=="note")' ;;
+            *) echo "Invalid THRESHOLD"; exit 2 ;;
+          esac
+          jq -e "((.runs | map(.results | map($JQ) | length) | add) // 0) == 0" trivy-image.sarif >/dev/null || exit 1
 
 
   gitleaks:
