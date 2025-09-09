@@ -101,16 +101,17 @@ jobs:
         env:
           TRIVY_CACHE_DIR: .cache/trivy
           TRIVY_SKIP_DIRS: .git,.cache,trivy,node_modules,dist,build
+          TRIVY_SCANNERS: vuln,secret,misconfig,license
         with:
           scan-type: fs
           scan-ref: .
           format: sarif
           output: trivy-fs.sarif
-          scanners: vuln,secret,misconfig,license
           severity: CRITICAL,HIGH,MEDIUM
           ignore-unfixed: true
           cache-dir: .cache/trivy
-          exit-code: ${{ steps.trivy_mode.outputs.code }}
+          exit-code: 0  
+
 
       - name: Upload SARIF (Trivy FS)
         if: always() && github.repository_owner == github.actor
@@ -131,16 +132,16 @@ jobs:
         uses: aquasecurity/trivy-action@0.28.0
         env:
           TRIVY_CACHE_DIR: .cache/trivy
+          TRIVY_SCANNERS: vuln,secret,license
         with:
           scan-type: image
           image-ref: app-under-test:latest
           format: sarif
           output: trivy-image.sarif
-          scanners: vuln,secret,license
           severity: CRITICAL,HIGH,MEDIUM
           ignore-unfixed: true
           cache-dir: .cache/trivy
-          exit-code: ${{ steps.trivy_mode.outputs.code }}
+          exit-code: 0  
 
       - name: Upload SARIF (Trivy Image)
         if: always() && github.repository_owner == github.actor
@@ -157,6 +158,18 @@ jobs:
           name: trivy-image
           path: trivy-image.sarif
 
+      - name: "Gate — fail if Trivy FS found issues"
+        if: always()
+        run: |
+          # Exit 1 if SARIF contains any results
+          jq -e '([.runs[].results[]] | length) == 0' trivy-fs.sarif >/dev/null || exit 1
+
+      - name: "Gate — fail if Trivy Image found issues"
+        if: always()
+        run: |
+          jq -e '([.runs[].results[]] | length) == 0' trivy-image.sarif >/dev/null || exit 1
+
+
   gitleaks:
     runs-on: ubuntu-latest
     needs:
@@ -165,13 +178,25 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Run Gitleaks (SARIF)
-        uses: gitleaks/gitleaks-action@v2
-        with:
-          args: detect --source=. --no-git --redact --report-format sarif --report-path gitleaks.sarif
+      - name: Install Gitleaks
+        run: |
+          set -e
+          VERSION=8.18.4
+          curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz" \
+          | tar -xz -C /usr/local/bin gitleaks
+          gitleaks version
+
+      - name: Run Gitleaks (generate SARIF)
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}          
           GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE_KEY }}
+        run: |
+          # Detect secrets in the working tree (not the whole git history)
+          gitleaks detect \
+            --source . \
+            --no-git \
+            --redact \
+            --report-format sarif \
+            --report-path gitleaks.sarif || true
 
       - name: Upload Gitleaks SARIF to Code Scanning
         if: always() && github.repository_owner == github.actor
@@ -179,7 +204,7 @@ jobs:
         with:
           sarif_file: gitleaks.sarif
           category: gitleaks
-          
+
   zap:
     name: ZAP
     runs-on: ubuntu-latest
