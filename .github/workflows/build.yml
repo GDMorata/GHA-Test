@@ -88,7 +88,7 @@ jobs:
   zap:
     name: ZAP
     runs-on: ubuntu-latest
-    # if: always() -- will proceed kahit nag fail si semgrep
+    if: always() # -- will proceed kahit nag fail si gitleaks
     needs: 
         - gitleaks
         - semgrep
