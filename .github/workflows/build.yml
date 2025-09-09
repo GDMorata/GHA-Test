@@ -1,4 +1,4 @@
-name: ZAP DAST (Static Site in Docker)
+name: Main Pipeline
 
 on:
   push
@@ -91,10 +91,11 @@ jobs:
     name: ZAP
     runs-on: ubuntu-latest
     if: always() # -- will proceed kahit nag fail si gitleaks
-    needs: 
-        - gitleaks
-        - semgrep
-        - trivy
+    needs: [gitleaks, semgrep, trivy]
+    permissions:
+      contents: read
+      actions: read       
+      security-events: write 
 
     steps:
       - name: Checkout repo
@@ -135,14 +136,14 @@ jobs:
           target: 'http://localhost:8080'
           cmd_options: '-r zap_report.html -w zap_report.md -J zap_report.json'
 
-      - name: Convert ZAP results to SARIF
+      - name: Create SARIF from ZAP results
         uses: SvanBoxel/zaproxy-to-ghas@main
-      - name: Upload ZAP SARIF to Code Scanning
+      - name: Upload SARIF to Code Scanning
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: results.sarif
 
-      - name: Upload ZAP reports
+      - name: Upload ZAP reports as artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
