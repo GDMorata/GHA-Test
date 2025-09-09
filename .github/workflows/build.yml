@@ -79,6 +79,8 @@ jobs:
 
       - name: Run Gitleaks
         uses: gitleaks/gitleaks-action@v2
+        env:
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE_KEY }}
 
       - name: Upload Gitleaks SARIF to Code Scanning
         uses: github/codeql-action/upload-sarif@v3
