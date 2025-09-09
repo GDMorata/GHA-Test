@@ -135,6 +135,13 @@ jobs:
           target: 'http://localhost:8080'
           cmd_options: '-r zap_report.html -w zap_report.md -J zap_report.json -o zap_report.sarif'
 
+      - name: Convert ZAP results to SARIF
+        uses: SvanBoxel/zaproxy-to-ghas@main
+      - name: Upload ZAP SARIF to Code Scanning
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: results.sarif
+
       - name: Upload ZAP reports
         if: always()
         uses: actions/upload-artifact@v4
