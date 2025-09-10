@@ -160,6 +160,7 @@ jobs:
  
   gitleaks:
     runs-on: ubuntu-latest
+    if: always()
     needs: 
       - semgrep
       - trivy
@@ -185,7 +186,7 @@ jobs:
         - gitleaks
         - semgrep
         - trivy
-        
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
