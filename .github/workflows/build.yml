@@ -160,31 +160,25 @@ jobs:
 
   gitleaks:
     runs-on: ubuntu-latest
-    needs:
+    needs: 
       - semgrep
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Gitleaks
-        run: |
-          set -e
-          VERSION=8.18.4
-          curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz" \
-          | tar -xz -C /usr/local/bin gitleaks
-          gitleaks version
-
-      - name: Run Gitleaks (generate SARIF)
+      - name: Run Gitleaks (with summary + SARIF)
+        uses: gitleaks/gitleaks-action@v2
         env:
           GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE_KEY }}
-        run: |
-          # Detect secrets in the working tree (not the whole git history)
-          gitleaks detect \
-            --source . \
-            --no-git \
-            --redact \
-            --report-format sarif \
-            --report-path gitleaks.sarif || true
+        with:
+          args: >
+            detect
+            --source .
+            --no-git
+            --redact
+            --report-format sarif
+            --report-path gitleaks.sarif
+            --exit-code 0  # don't fail the job
 
       - name: Upload Gitleaks SARIF to Code Scanning
         if: always() && github.repository_owner == github.actor
@@ -250,6 +244,4 @@ jobs:
             zap_report.json
       - name: Cleanup
         if: always()
-
-
         run: docker rm -f aut || true
