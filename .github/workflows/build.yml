@@ -53,15 +53,16 @@ jobs:
             semgrep.json
             semgrep.sarif
             semgrep-junit.xml
-
-  # One Docker build reused for Trivy (fs+image) and ZAP
-  container-security:
+          
+  Trivy:
     runs-on: ubuntu-latest
-    needs: [semgrep]
+    needs: 
+      - semgrep
     permissions:
       contents: read
       security-events: write
       actions: read
+
     steps:
       - name: Checkout (full history for better scanning)
         uses: actions/checkout@v4
@@ -71,7 +72,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build app image (once, reuse for Trivy & ZAP)
+      - name: Build app image (for image scanning)
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -79,8 +80,6 @@ jobs:
           tags: app-under-test:latest
           push: false
           load: true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
 
       - name: Decide Trivy exit-code (block on main only)
         id: trivy_mode
@@ -90,7 +89,6 @@ jobs:
           else
             echo "code=0" >> "$GITHUB_OUTPUT"
           fi
-
       - name: Cache Trivy DB
         uses: actions/cache@v4
         with:
@@ -98,144 +96,67 @@ jobs:
           key: trivy-db-${{ runner.os }}-${{ github.ref_name }}
           restore-keys: |
             trivy-db-${{ runner.os }}-
-
-      # -------- Trivy FS --------
       - name: Trivy filesystem scan
         uses: aquasecurity/trivy-action@0.28.0
         env:
           TRIVY_CACHE_DIR: .cache/trivy
           TRIVY_SKIP_DIRS: .git,.cache,trivy,node_modules,dist,build
-          TRIVY_SCANNERS: vuln,secret,misconfig
         with:
           scan-type: fs
           scan-ref: .
           format: sarif
           output: trivy-fs.sarif
+          scanners: vuln,secret,license
           severity: CRITICAL,HIGH,MEDIUM
           ignore-unfixed: true
           cache-dir: .cache/trivy
-          exit-code: 0  # keep running; we gate at the end
-
-      - name: Filter GPL/LGPL from SARIF (FS)
-        run: |
-          jq '
-            .runs |=
-            ( . // [] | map(
-                .results |=
-                ( .results // [] | map(
-                    select( ((.message.text // "") | test("\\bL?GPL\\b"; "i")) | not )
-                ))
-              ))
-          ' trivy-fs.sarif > trivy-fs.filtered.sarif
+          exit-code: ${{ steps.trivy_mode.outputs.code }}
 
       - name: Upload SARIF (Trivy FS)
         if: always() && github.repository_owner == github.actor
         uses: github/codeql-action/upload-sarif@v3
         with:
-          sarif_file: trivy-fs.filtered.sarif
+          sarif_file: trivy-fs.sarif
           category: trivy-fs
-          wait-for-processing: false
+          wait-for-processing: false   
 
       - name: Upload artifact (Trivy FS)
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: trivy-fs
-          path: trivy-fs.filtered.sarif
+          path: trivy-fs.sarif
 
-      # -------- Trivy Image --------
       - name: Trivy image scan
         uses: aquasecurity/trivy-action@0.28.0
         env:
           TRIVY_CACHE_DIR: .cache/trivy
-          TRIVY_SCANNERS: vuln,secret,license
         with:
           scan-type: image
           image-ref: app-under-test:latest
           format: sarif
           output: trivy-image.sarif
+          scanners: vuln,secret,license
           severity: CRITICAL,HIGH,MEDIUM
           ignore-unfixed: true
           cache-dir: .cache/trivy
-          exit-code: 0  # keep running; we gate at the end
-
-      - name: Filter GPL/LGPL from SARIF (Image)
-        run: |
-          jq '
-            .runs |=
-            ( . // [] | map(
-                .results |=
-                ( .results // [] | map(
-                    select( ((.message.text // "") | test("\\bL?GPL\\b"; "i")) | not )
-                ))
-              ))
-          ' trivy-image.sarif > trivy-image.filtered.sarif
+          exit-code: ${{ steps.trivy_mode.outputs.code }}
 
       - name: Upload SARIF (Trivy Image)
         if: always() && github.repository_owner == github.actor
         uses: github/codeql-action/upload-sarif@v3
         with:
-          sarif_file: trivy-image.filtered.sarif
+          sarif_file: trivy-image.sarif
           category: trivy-image
-          wait-for-processing: false
+          wait-for-processing: false   
 
       - name: Upload artifact (Trivy Image)
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: trivy-image
-          path: trivy-image.filtered.sarif
+          path: trivy-image.sarif
 
-      # -------- ZAP using the same local image --------
-      - name: Run app container
-        run: docker run -d --name aut -p 8080:80 app-under-test:latest
-
-      - name: Wait for app to be ready
-        run: |
-          for i in {1..60}; do
-            if curl -fsS http://localhost:8080/ > /dev/null; then
-              echo "App is up."
-              exit 0
-            fi
-            echo "Waiting for app... ($i/60)"
-            sleep 2
-          done
-          echo "App did not start in time."
-          docker logs aut || true
-          exit 1
-
-      - name: ZAP Full Scan
-        uses: zaproxy/action-full-scan@v0.12.0
-        with:
-          target: 'http://localhost:8080'
-          cmd_options: '-r zap_report.html -w zap_report.md -J zap_report.json'
-
-      - name: Upload ZAP reports
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: zap-reports
-          path: |
-            zap_report.html
-            zap_report.md
-            zap_report.json
-
-      - name: Cleanup
-        if: always()
-        run: docker rm -f aut || true
-
-      # -------- Final Security Gate (after all scans) --------
-      - name: Security Gate — fail on main if Trivy has errors
-        if: ${{ always() && github.ref == 'refs/heads/main' }}
-        run: |
-          FS_OK=$(jq -e '((.runs | map(.results | map(select(.level=="error")) | length) | add) // 0) == 0' trivy-fs.filtered.sarif >/dev/null; echo $?)
-          IMG_OK=$(jq -e '((.runs | map(.results | map(select(.level=="error")) | length) | add) // 0) == 0' trivy-image.filtered.sarif >/dev/null; echo $?)
-
-          if [[ "$FS_OK" -ne 0 || "$IMG_OK" -ne 0 ]]; then
-            echo "Security gate failed: Trivy reported error-level findings."
-            exit 1
-          fi
-          echo "Security gate passed."
 
   gitleaks:
     runs-on: ubuntu-latest
@@ -257,6 +178,7 @@ jobs:
         env:
           GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE_KEY }}
         run: |
+          # Detect secrets in the working tree (not the whole git history)
           gitleaks detect \
             --source . \
             --no-git \
@@ -270,3 +192,64 @@ jobs:
         with:
           sarif_file: gitleaks.sarif
           category: gitleaks
+
+  zap:
+    name: ZAP
+    runs-on: ubuntu-latest
+    if: always() # -- will proceed kahit nag fail si gitleaks
+    needs: 
+        - gitleaks
+        - semgrep
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build app image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          tags: app-under-test:latest
+          push: false
+          load: true
+
+      - name: Run app container
+        run: docker run -d --name aut -p 8080:80 app-under-test:latest
+
+      - name: Wait for app to be ready
+        run: |
+          for i in {1..60}; do
+            if curl -fsS http://localhost:8080/ > /dev/null; then
+              echo "App is up."
+              exit 0
+            fi
+            echo "Waiting for app... ($i/60)"
+            sleep 2
+          done
+          echo "App did not start in time."
+          docker logs aut || true
+          exit 1
+      - name: ZAP Full Scan
+        uses: zaproxy/action-full-scan@v0.12.0
+        with:
+          target: 'http://localhost:8080'
+          cmd_options: '-r zap_report.html -w zap_report.md -J zap_report.json'
+
+      - name: Upload ZAP reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-reports
+          path: |
+            zap_report.html
+            zap_report.md
+            zap_report.json
+      - name: Cleanup
+        if: always()
+
+
+        run: docker rm -f aut || true
