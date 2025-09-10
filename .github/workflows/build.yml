@@ -54,7 +54,7 @@ jobs:
             semgrep.sarif
             semgrep-junit.xml
           
-  Dependencies-and-Secrets:
+  Trivy:
     runs-on: ubuntu-latest
     needs: [semgrep]
 
@@ -186,7 +186,6 @@ jobs:
         with:
           name: trivy-image
           path: trivy-image.filtered.sarif
-
 
   gitleaks:
     runs-on: ubuntu-latest
