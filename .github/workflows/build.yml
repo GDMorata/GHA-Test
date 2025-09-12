@@ -157,6 +157,25 @@ jobs:
           name: trivy-image
           path: trivy-image.sarif
 
+  snyk-iac:
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - semgrep
+      - trivy
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Snyk Infrastructure as Code scan
+        id: snyk-iac-scan
+        uses: Gershon-A/snyk-iac-code-security-checks@v1.0.1
+        continue-on-error: true
+        with:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+          SEVERITY_THRESHOLD: "critical"
+          FILE: "example-*"
+          update_pr_with_scan_results: true
  
   gitleaks:
     runs-on: ubuntu-latest
@@ -164,6 +183,7 @@ jobs:
     needs: 
       - semgrep
       - trivy
+      - snyk-iac
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -186,6 +206,7 @@ jobs:
         - gitleaks
         - semgrep
         - trivy
+        - snyk-iac
 
     steps:
       - name: Checkout repo
@@ -236,4 +257,5 @@ jobs:
             zap_report.json
       - name: Cleanup
         if: always()
+
         run: docker rm -f aut || true
