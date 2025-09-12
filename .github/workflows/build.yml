@@ -173,6 +173,7 @@ jobs:
         continue-on-error: true
         with:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+          SNYK_ORG_ID: ${{ secrets.SNYK_ORG_ID }}
           SEVERITY_THRESHOLD: "critical"
           FILE: "example-*"
           update_pr_with_scan_results: true
@@ -259,3 +260,4 @@ jobs:
         if: always()
 
         run: docker rm -f aut || true
+
