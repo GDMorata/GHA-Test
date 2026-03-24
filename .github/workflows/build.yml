@@ -97,7 +97,7 @@ jobs:
           restore-keys: |
             trivy-db-${{ runner.os }}-
       - name: Trivy filesystem scan
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.35.0
         env:
           TRIVY_CACHE_DIR: .cache/trivy
           TRIVY_SKIP_DIRS: .git,.cache,trivy,node_modules,dist,build
@@ -128,7 +128,7 @@ jobs:
           path: trivy-fs.sarif
 
       - name: Trivy image scan
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.35.0
         env:
           TRIVY_CACHE_DIR: .cache/trivy
         with:
